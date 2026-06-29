@@ -1,4 +1,4 @@
-# ⚽ WC 2026 CLI
+#  WC 2026 CLI
 
 A FIFA World Cup 2026 terminal dashboard built with Node.js. Live scores, group standings, upcoming fixtures — all from your terminal.
 
