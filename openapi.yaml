@@ -1,0 +1,239 @@
+openapi: 3.0.3
+
+info:
+  title: Atlas Security Scanning API
+  version: 1.0.0
+  description: API contract between Nexus Core and Atlas for synchronous container image vulnerability scanning.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+tags:
+  - name: Scans
+    description: Container image security scanning
+
+paths:
+  /api/v1/scans:
+    post:
+      tags:
+        - Scans
+      summary: Scan a container image before deployment
+      description: |
+        Core submits a deployment request. Atlas scans the specified image
+        using Trivy and returns vulnerability counts and a deployment decision.
+        The current policy blocks deployment when at least one critical
+        vulnerability is detected.
+      operationId: scanImage
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScanRequest'
+            example:
+              deployId: dep_8f3a21
+              appName: payment-gateway
+              environment: production
+              image: registry.local/payment-gateway:v1.0
+              commitSha: a1b2c3d
+              requestedBy: core
+      responses:
+        '200':
+          description: Image scan completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResponse'
+              examples:
+                passed:
+                  summary: No critical vulnerabilities detected
+                  value:
+                    deployId: dep_8f3a21
+                    appName: payment-gateway
+                    environment: production
+                    status: PASSED
+                    criticalCount: 0
+                    highCount: 2
+                    mediumCount: 3
+                    lowCount: 5
+                    message: No critical vulnerabilities detected
+                blocked:
+                  summary: Critical vulnerabilities detected
+                  value:
+                    deployId: dep_8f3a21
+                    appName: payment-gateway
+                    environment: production
+                    status: BLOCKED
+                    criticalCount: 1
+                    highCount: 2
+                    mediumCount: 3
+                    lowCount: 5
+                    message: Deployment blocked due to critical vulnerabilities
+
+        '400':
+          description: Invalid request or malformed JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanError'
+              example:
+                error: INVALID_REQUEST
+                message: Request body is missing or invalid JSON
+                deployId: null
+
+        '401':
+          description: Missing or invalid service token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanError'
+              example:
+                error: UNAUTHORIZED
+                message: Invalid service token
+                deployId: null
+
+        '404':
+          description: Container image could not be retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanError'
+              example:
+                error: IMAGE_NOT_FOUND
+                message: Could not retrieve the requested container image
+                deployId: dep_8f3a21
+
+        '422':
+          description: Container image could not be scanned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanError'
+              example:
+                error: IMAGE_UNSCANNABLE
+                message: The requested container image could not be scanned
+                deployId: dep_8f3a21
+
+        '504':
+          description: Vulnerability scan timed out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanError'
+              example:
+                error: SCAN_TIMEOUT
+                message: Trivy scan timed out
+                deployId: dep_8f3a21
+
+        '500':
+          description: Internal scanner or server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanError'
+              example:
+                error: INTERNAL_ERROR
+                message: Trivy failed to complete the vulnerability scan
+                deployId: dep_8f3a21
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: ServiceToken
+
+  schemas:
+    ScanRequest:
+      type: object
+      required:
+        - deployId
+        - appName
+        - environment
+        - image
+        - commitSha
+        - requestedBy
+      properties:
+        deployId:
+          type: string
+          example: dep_8f3a21
+        appName:
+          type: string
+          example: payment-gateway
+        environment:
+          type: string
+          example: production
+        image:
+          type: string
+          description: Container image reference that Atlas must scan.
+          example: registry.local/payment-gateway:v1.0
+        commitSha:
+          type: string
+          example: a1b2c3d
+        requestedBy:
+          type: string
+          example: core
+
+    ScanResponse:
+      type: object
+      required:
+        - deployId
+        - appName
+        - environment
+        - status
+        - criticalCount
+        - highCount
+        - mediumCount
+        - lowCount
+        - message
+      properties:
+        deployId:
+          type: string
+        appName:
+          type: string
+        environment:
+          type: string
+        status:
+          type: string
+          enum:
+            - PASSED
+            - BLOCKED
+        criticalCount:
+          type: integer
+          minimum: 0
+        highCount:
+          type: integer
+          minimum: 0
+        mediumCount:
+          type: integer
+          minimum: 0
+        lowCount:
+          type: integer
+          minimum: 0
+        message:
+          type: string
+
+    ScanError:
+      type: object
+      required:
+        - error
+        - message
+        - deployId
+      properties:
+        error:
+          type: string
+          enum:
+            - INVALID_REQUEST
+            - UNAUTHORIZED
+            - IMAGE_NOT_FOUND
+            - IMAGE_UNSCANNABLE
+            - SCAN_TIMEOUT
+            - INTERNAL_ERROR
+        message:
+          type: string
+        deployId:
+          type: string
+          nullable: true
