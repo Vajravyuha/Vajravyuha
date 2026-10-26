@@ -50,3 +50,36 @@ application-secret.properties
 logs/
 # Local application configuration
 /src/main/resources/application.properties
+# dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# local state and data
+*.sqlite
+*.db
+data/
+logs/
+*.log
+
+# build and test output
+dist/
+build/
+coverage/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
