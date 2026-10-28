@@ -77,6 +77,28 @@ public ResponseEntity<ScanErrorResponse> handleScanError(
 
     return ResponseEntity.status(status).body(response);
 }
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ScanErrorResponse> handleIllegalArgument(
+        IllegalArgumentException ex) {
+
+        boolean applicationNotFound =
+                "Application not found".equals(ex.getMessage());
+
+        HttpStatus status = applicationNotFound
+                ? HttpStatus.NOT_FOUND
+                : HttpStatus.BAD_REQUEST;
+
+        String errorCode = applicationNotFound
+                ? "APPLICATION_NOT_FOUND"
+                : "INVALID_REQUEST";
+
+        return errorResponse(
+                status,
+                errorCode,
+                ex.getMessage(),
+                null
+        );
+    }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ScanErrorResponse> handleUnexpectedError(

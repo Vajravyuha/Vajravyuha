@@ -83,3 +83,9 @@ coverage/
 .idea/
 .DS_Store
 Thumbs.db
+
+atlasdb-backup.sql
+
+# Local database backups
+*.dump
+*.backup

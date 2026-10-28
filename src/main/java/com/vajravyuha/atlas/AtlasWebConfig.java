@@ -15,7 +15,10 @@ public class AtlasWebConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(authInterceptor)
-                .addPathPatterns("/api/v1/scans");
-    }
+    registry.addInterceptor(authInterceptor)
+            .addPathPatterns(
+                    "/api/v1/scans",
+                    "/api/v1/applications/**"
+            );
+}
 }

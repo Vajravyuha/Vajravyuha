@@ -13,6 +13,9 @@ tags:
   - name: Scans
     description: Container image security scanning
 
+  - name: Secrets
+    description: Secure application secret storage and retrieval
+
 paths:
   /api/v1/scans:
     post:
@@ -139,6 +142,106 @@ paths:
                 message: Trivy failed to complete the vulnerability scan
                 deployId: dep_8f3a21
 
+  /api/v1/applications/{appName}/secrets:
+    put:
+      tags:
+        - Secrets
+      summary: Store or update application secrets
+      operationId: storeApplicationSecrets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: appName
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreSecretsRequest'
+            example:
+              secrets:
+                DATABASE_PASSWORD: dummy-password
+                JWT_SECRET: dummy-jwt-secret
+      responses:
+        '200':
+          description: Secrets stored successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoreSecretsResponse'
+              example:
+                appName: payment-gateway
+                status: SUCCESS
+                message: Secrets stored successfully
+                secretCount: 2
+        '400':
+          description: Invalid request or secret data
+        '401':
+          description: Missing or invalid service token
+
+    get:
+      tags:
+        - Secrets
+      summary: Retrieve application secrets
+      description: |
+        Retrieves the application's stored secrets.
+        Atlas decrypts the secrets before returning them.
+        Only authorized Core services should call this endpoint,
+        after verifying that the deployment is authorized to access them.
+      operationId: retrieveApplicationSecrets
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: appName
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: Application secrets retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrieveSecretsResponse'
+              example:
+                DATABASE_PASSWORD: dummy-password
+                JWT_SECRET: dummy-jwt-secret
+
+        '400':
+          description: Invalid application name or request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanError'
+
+        '401':
+          description: Missing or invalid service token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanError'
+
+        '404':
+          description: Application not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanError'
+
+        '500':
+          description: Internal server or secret decryption error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -237,3 +340,39 @@ components:
         deployId:
           type: string
           nullable: true
+
+    StoreSecretsRequest:
+      type: object
+      required:
+        - secrets
+      properties:
+        secrets:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            type: string
+
+    StoreSecretsResponse:
+      type: object
+      required:
+        - appName
+        - status
+        - message
+        - secretCount
+      properties:
+        appName:
+          type: string
+        status:
+          type: string
+          enum:
+            - SUCCESS
+        message:
+          type: string
+        secretCount:
+          type: integer
+          minimum: 1
+    RetrieveSecretsResponse:
+      type: object
+      description: Map of secret names to their decrypted values.
+      additionalProperties:
+        type: string
