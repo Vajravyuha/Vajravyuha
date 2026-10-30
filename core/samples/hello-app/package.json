@@ -1,0 +1,10 @@
+{
+  "name": "vajravyuha-hello-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A tiny sample deployment for Vajravyuha Core.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "vajravyuha-core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A small, security-first deployment engine integrated with Atlas.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "fake-atlas": "node tools/fake-atlas.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dockerode": "^4.0.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "http-proxy": "^1.18.1",
+    "tar-fs": "^3.0.8",
+    "zod": "^3.24.2"
+  }
+}
