@@ -7,3 +7,4 @@ core.db-shm
 core.db-wal
 *.log
 .DS_Store
+workspaces/

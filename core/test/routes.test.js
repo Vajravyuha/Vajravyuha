@@ -23,14 +23,30 @@ function routeDependencies(overrides = {}) {
   const rows = new Map();
   const store = {
     createDeployment(row) {
-      rows.set(row.id, { ...row, status: 'PENDING', restartCount: 0 });
+      rows.set(row.id, {
+        status: 'PENDING',
+        restartCount: 0,
+        port: null,
+        reason: null,
+        criticalCount: null,
+        highCount: null,
+        mediumCount: null,
+        lowCount: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        ...row
+      });
       return rows.get(row.id);
     },
-    getDeployment(id) { return rows.get(id) || null; }
+    getDeployment(id) { return rows.get(id) || null; },
+    listDeployments(limit = 20) {
+      return [...rows.values()].reverse().slice(0, Math.min(limit, 100));
+    }
   };
   const config = {
     coreApiKey: 'test-api-key',
     allowedApps: null,
+    frontendOrigin: 'http://localhost:5173',
     ...(overrides.config || {})
   };
   const orchestrator = {
@@ -222,6 +238,162 @@ test('PUT application secrets returns only the app name and secret count', async
     });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { appName: 'sample-app', secretCount: 1 });
+  } finally {
+    await closeTestServer(server.server);
+  }
+});
+
+// Verify a deployment can be created from a GitHub URL alone, with branch defaulted to main.
+test('deploy accepts a repoUrl instead of commitSha and contextDir', async () => {
+  let pipelineArgs;
+  const dependencies = routeDependencies({
+    orchestrator: {
+      runPipeline(id, options) {
+        pipelineArgs = { id, options };
+        return new Promise(() => {});
+      },
+      async stop() {},
+      async getLogs() { return []; }
+    }
+  });
+  const server = await startTestServer(createRoutes(dependencies));
+  try {
+    const response = await fetch(`${server.baseUrl}/deployments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': 'test-api-key' },
+      body: JSON.stringify({
+        appName: 'sample-app',
+        environment: 'test',
+        repoUrl: 'https://github.com/example/app.git'
+      })
+    });
+    assert.equal(response.status, 202);
+    const result = await response.json();
+    assert.equal(pipelineArgs.id, result.id);
+    assert.equal(pipelineArgs.options.repoUrl, 'https://github.com/example/app.git');
+    assert.equal(pipelineArgs.options.branch, 'main');
+
+    const row = dependencies.store.getDeployment(result.id);
+    assert.equal(row.repoUrl, 'https://github.com/example/app.git');
+    assert.equal(row.branch, 'main');
+  } finally {
+    await closeTestServer(server.server);
+  }
+});
+
+// Verify repoUrl and contextDir are mutually exclusive and neither leaks into other routes.
+test('deploy rejects repoUrl combined with contextDir', async () => {
+  const dependencies = routeDependencies();
+  const server = await startTestServer(createRoutes(dependencies));
+  try {
+    const response = await fetch(`${server.baseUrl}/deployments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': 'test-api-key' },
+      body: JSON.stringify({
+        appName: 'sample-app',
+        environment: 'test',
+        repoUrl: 'https://github.com/example/app.git',
+        contextDir: 'samples/hello-app'
+      })
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error, 'INVALID_REQUEST');
+  } finally {
+    await closeTestServer(server.server);
+  }
+});
+
+// Verify a contextDir outside core/samples is rejected instead of being built.
+test('deploy rejects a contextDir outside core/samples', async () => {
+  const dependencies = routeDependencies();
+  const server = await startTestServer(createRoutes(dependencies));
+  try {
+    for (const contextDir of ['../', '../../etc', '/etc', 'samples/../..']) {
+      const response = await fetch(`${server.baseUrl}/deployments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': 'test-api-key' },
+        body: JSON.stringify({
+          appName: 'sample-app',
+          environment: 'test',
+          commitSha: 'a1b2c3d',
+          contextDir
+        })
+      });
+      assert.equal(response.status, 400, `contextDir ${contextDir} must be rejected`);
+    }
+  } finally {
+    await closeTestServer(server.server);
+  }
+});
+
+// Verify the browser preflight succeeds before the API-key check.
+test('CORS preflight succeeds without an API key', async () => {
+  const server = await startTestServer(createRoutes(routeDependencies()));
+  try {
+    const response = await fetch(`${server.baseUrl}/deployments`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://localhost:5173',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type,x-api-key'
+      }
+    });
+    assert.equal(response.status, 204);
+    assert.equal(response.headers.get('access-control-allow-origin'), 'http://localhost:5173');
+    const allowedHeaders = response.headers.get('access-control-allow-headers').toLowerCase();
+    assert.equal(allowedHeaders.includes('x-api-key'), true);
+    assert.equal(allowedHeaders.includes('content-type'), true);
+    assert.match(response.headers.get('access-control-allow-methods'), /POST/);
+  } finally {
+    await closeTestServer(server.server);
+  }
+});
+
+// Verify the deployment list needs the API key and never returns environment values.
+test('GET /deployments lists newest deployments and requires X-API-Key', async () => {
+  const dependencies = routeDependencies();
+  dependencies.store.createDeployment({
+    id: 'dep_first',
+    appName: 'sample-app',
+    environment: 'test',
+    commitSha: 'a1b2c3d',
+    repoUrl: null,
+    branch: null,
+    requestedBy: 'test-suite',
+    envVars: { PRIVATE_SETTING: 'list-only-secret-value' }
+  });
+  dependencies.store.createDeployment({
+    id: 'dep_second',
+    appName: 'sample-app',
+    environment: 'test',
+    commitSha: 'd4e5f6a',
+    repoUrl: 'https://github.com/example/app.git',
+    branch: 'main',
+    requestedBy: 'test-suite'
+  });
+  const server = await startTestServer(createRoutes(dependencies));
+  try {
+    const unauthorized = await fetch(`${server.baseUrl}/deployments`);
+    assert.equal(unauthorized.status, 401);
+
+    const response = await fetch(`${server.baseUrl}/deployments?limit=10`, {
+      headers: { 'X-API-Key': 'test-api-key' }
+    });
+    assert.equal(response.status, 200);
+    const body = await response.text();
+    assert.equal(body.includes('list-only-secret-value'), false);
+
+    const deployments = JSON.parse(body);
+    assert.equal(Array.isArray(deployments), true);
+    assert.equal(deployments.length, 2);
+    assert.equal(deployments[0].id, 'dep_second');
+    assert.equal(deployments[0].repoUrl, 'https://github.com/example/app.git');
+    assert.equal(deployments[0].branch, 'main');
+    assert.deepEqual(Object.keys(deployments[0]).sort(), [
+      'appName', 'branch', 'commitSha', 'createdAt', 'criticalCount', 'environment',
+      'highCount', 'id', 'lowCount', 'mediumCount', 'port', 'reason', 'repoUrl',
+      'restartCount', 'status', 'updatedAt'
+    ]);
   } finally {
     await closeTestServer(server.server);
   }

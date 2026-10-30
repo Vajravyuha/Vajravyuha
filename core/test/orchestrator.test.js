@@ -4,7 +4,7 @@ const { STATUS, IN_PROGRESS } = require('../src/domain/states');
 const { createOrchestrator } = require('../src/services/orchestrator');
 
 // Create a small in-memory deployment store for service-level tests.
-function makeStore() {
+function makeStore(overrides = {}) {
   let row = {
     id: 'dep_abcdef',
     appName: 'sample-app',
@@ -22,7 +22,10 @@ function makeStore() {
     highCount: null,
     mediumCount: null,
     lowCount: null,
-    restartCount: 0
+    restartCount: 0,
+    repoUrl: null,
+    branch: null,
+    ...overrides
   };
   return {
     getDeployment: () => ({ ...row }),
@@ -63,10 +66,16 @@ function makeDependencies(overrides = {}) {
     ...overrides.atlasClient
   };
   const proxy = { markHealthy() {}, forget() {} };
+  // Git is never called unless a test deploys from a repository URL.
+  const gitService = overrides.gitService || {
+    async cloneRepo() { throw new Error('cloneRepo must not be called in this test'); },
+    async removeWorkspace() { return true; }
+  };
   const orchestrator = createOrchestrator({
     store,
     dockerRunner,
     atlasClient,
+    gitService,
     config: { registryEnabled: false },
     healthCheck: async () => true,
     findPort: async () => 4001,
@@ -245,4 +254,127 @@ test('mutable tag changes after scan fail closed', async () => {
   assert.equal(store.getDeployment('dep_abcdef').status, STATUS.FAILED);
   assert.equal(store.getDeployment('dep_abcdef').reason, 'IMAGE_CHANGED_AFTER_SCAN');
   assert.equal(calls.run, 0);
+});
+
+// Create a fake git service that records calls and returns one checkout directory.
+function makeFakeGit({ sha = 'f00dbabe1234567890abcdef1234567890abcdef', fail = null } = {}) {
+  const calls = { clone: [], removed: [] };
+  return {
+    calls,
+    async cloneRepo(repoUrl, branch, deployId) {
+      calls.clone.push({ repoUrl, branch, deployId });
+      if (fail) throw fail;
+      return { dir: `/tmp/workspaces/${deployId}`, commitSha: sha };
+    },
+    async removeWorkspace(deployId) {
+      calls.removed.push(deployId);
+      return true;
+    }
+  };
+}
+
+// Verify a repository deployment clones, builds the checkout and sends the cloned SHA to Atlas.
+test('repository deployment builds the clone and scans the cloned SHA', async () => {
+  const sha = 'f00dbabe1234567890abcdef1234567890abcdef';
+  const git = makeFakeGit({ sha });
+  const built = [];
+  let scannedSha = null;
+  const { store, orchestrator, calls } = makeDependencies({
+    store: makeStore({ repoUrl: 'https://github.com/example/app.git', branch: 'main', commitSha: '' }),
+    gitService: git,
+    dockerRunner: {
+      async buildImage(directory, tag) {
+        calls.build += 1;
+        built.push({ directory, tag });
+      }
+    },
+    atlasClient: {
+      async scan(request) {
+        scannedSha = request.commitSha;
+        return { verdict: 'PASSED' };
+      }
+    }
+  });
+
+  await orchestrator.runPipeline('dep_abcdef', {
+    repoUrl: 'https://github.com/example/app.git',
+    branch: 'main'
+  });
+
+  const row = store.getDeployment('dep_abcdef');
+  assert.equal(row.status, STATUS.RUNNING);
+  assert.equal(row.commitSha, sha);
+  assert.equal(scannedSha, sha);
+  assert.deepEqual(git.calls.clone, [{
+    repoUrl: 'https://github.com/example/app.git',
+    branch: 'main',
+    deployId: 'dep_abcdef'
+  }]);
+  assert.equal(built.length, 1);
+  assert.equal(built[0].directory, '/tmp/workspaces/dep_abcdef');
+  assert.deepEqual(git.calls.removed, ['dep_abcdef']);
+});
+
+// Verify a clone failure ends FAILED with the reason, removes the workspace and never builds.
+test('clone failure ends FAILED and removes the workspace', async () => {
+  const failure = Object.assign(new Error('fatal: repository not found'), { reason: 'CLONE_FAILED' });
+  const git = makeFakeGit({ fail: failure });
+  const { store, orchestrator, calls } = makeDependencies({
+    store: makeStore({ repoUrl: 'https://github.com/example/app.git', branch: 'main', commitSha: '' }),
+    gitService: git
+  });
+
+  await orchestrator.runPipeline('dep_abcdef', {
+    repoUrl: 'https://github.com/example/app.git',
+    branch: 'main'
+  });
+
+  const row = store.getDeployment('dep_abcdef');
+  assert.equal(row.status, STATUS.FAILED);
+  assert.equal(row.reason, 'CLONE_FAILED');
+  assert.equal(calls.build, 0);
+  assert.equal(calls.run, 0);
+  assert.equal(IN_PROGRESS.includes(row.status), false);
+  assert.deepEqual(git.calls.removed, ['dep_abcdef']);
+});
+
+// Verify a missing Dockerfile is stored as NO_DOCKERFILE and leaves nothing in progress.
+test('missing Dockerfile ends FAILED with NO_DOCKERFILE', async () => {
+  const failure = Object.assign(new Error('Repository has no Dockerfile at its root'), {
+    reason: 'NO_DOCKERFILE'
+  });
+  const git = makeFakeGit({ fail: failure });
+  const { store, orchestrator, calls } = makeDependencies({
+    store: makeStore({ repoUrl: 'https://github.com/example/app.git', branch: 'main', commitSha: '' }),
+    gitService: git
+  });
+
+  await orchestrator.runPipeline('dep_abcdef', {
+    repoUrl: 'https://github.com/example/app.git',
+    branch: 'main'
+  });
+
+  assert.equal(store.getDeployment('dep_abcdef').status, STATUS.FAILED);
+  assert.equal(store.getDeployment('dep_abcdef').reason, 'NO_DOCKERFILE');
+  assert.equal(calls.build, 0);
+});
+
+// Verify a build failure still removes the cloned workspace.
+test('a failed build still removes the workspace', async () => {
+  const git = makeFakeGit();
+  const { store, orchestrator } = makeDependencies({
+    store: makeStore({ repoUrl: 'https://github.com/example/app.git', branch: 'main', commitSha: '' }),
+    gitService: git,
+    dockerRunner: {
+      async buildImage() { throw new Error('Docker build failed'); }
+    }
+  });
+
+  await orchestrator.runPipeline('dep_abcdef', {
+    repoUrl: 'https://github.com/example/app.git',
+    branch: 'main'
+  });
+
+  assert.equal(store.getDeployment('dep_abcdef').status, STATUS.FAILED);
+  assert.deepEqual(git.calls.removed, ['dep_abcdef']);
 });

@@ -5,6 +5,8 @@ const COLUMN_NAMES = Object.freeze({
   appName: 'app_name',
   environment: 'environment',
   commitSha: 'commit_sha',
+  repoUrl: 'repo_url',
+  branch: 'branch',
   requestedBy: 'requested_by',
   status: 'status',
   image: 'image',
@@ -30,6 +32,8 @@ function mapRow(row) {
     appName: row.app_name,
     environment: row.environment,
     commitSha: row.commit_sha,
+    repoUrl: row.repo_url,
+    branch: row.branch,
     requestedBy: row.requested_by,
     status: row.status,
     image: row.image,
@@ -59,6 +63,8 @@ function createStore(dbPath) {
       app_name TEXT NOT NULL,
       environment TEXT NOT NULL,
       commit_sha TEXT NOT NULL,
+      repo_url TEXT,
+      branch TEXT,
       requested_by TEXT NOT NULL DEFAULT 'core',
       status TEXT NOT NULL CHECK (status IN (
         '${STATUS.PENDING}', '${STATUS.BUILDING}', '${STATUS.SCANNING}',
@@ -83,12 +89,23 @@ function createStore(dbPath) {
       ON deployments(status, created_at);
   `);
 
+  // Add the repository columns to a core.db file that was created by an older Core.
+  const existingColumns = new Set(
+    database.prepare('PRAGMA table_info(deployments)').all().map((column) => column.name)
+  );
+  if (!existingColumns.has(COLUMN_NAMES.repoUrl)) {
+    database.exec(`ALTER TABLE deployments ADD COLUMN ${COLUMN_NAMES.repoUrl} TEXT`);
+  }
+  if (!existingColumns.has(COLUMN_NAMES.branch)) {
+    database.exec(`ALTER TABLE deployments ADD COLUMN ${COLUMN_NAMES.branch} TEXT`);
+  }
+
   const insert = database.prepare(`
     INSERT INTO deployments (
-      id, app_name, environment, commit_sha, requested_by, status,
+      id, app_name, environment, commit_sha, repo_url, branch, requested_by, status,
       restart_count, created_at, updated_at
     ) VALUES (
-      @id, @appName, @environment, @commitSha, @requestedBy, @status,
+      @id, @appName, @environment, @commitSha, @repoUrl, @branch, @requestedBy, @status,
       0, @createdAt, @updatedAt
     )
   `);
@@ -100,6 +117,9 @@ function createStore(dbPath) {
     "SELECT * FROM deployments WHERE status IN ('PENDING', 'BUILDING', 'SCANNING', 'STARTING', 'RUNNING')"
   );
   const selectByStatus = database.prepare('SELECT * FROM deployments WHERE status = ?');
+  const selectRecent = database.prepare(
+    'SELECT * FROM deployments ORDER BY created_at DESC, rowid DESC LIMIT ?'
+  );
 
   // Insert a new deployment in PENDING before its pipeline is started.
   function createDeployment(deployment) {
@@ -108,7 +128,9 @@ function createStore(dbPath) {
       id: deployment.id,
       appName: deployment.appName,
       environment: deployment.environment,
-      commitSha: deployment.commitSha,
+      commitSha: deployment.commitSha || '',
+      repoUrl: deployment.repoUrl || null,
+      branch: deployment.branch || null,
       requestedBy: deployment.requestedBy || 'core',
       status: STATUS.PENDING,
       createdAt: now,
@@ -152,6 +174,13 @@ function createStore(dbPath) {
     return selectByStatus.all(status).map(mapRow);
   }
 
+  // Return the newest deployments first, without ever exposing request environment values.
+  function listDeployments(limit = 20) {
+    const requested = Number(limit);
+    const safeLimit = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 20;
+    return selectRecent.all(safeLimit).map(mapRow);
+  }
+
   // Close the SQLite connection during a graceful Core shutdown.
   function close() {
     database.close();
@@ -164,6 +193,7 @@ function createStore(dbPath) {
     getLatestRunningDeployment,
     getInProgressDeployments,
     getDeploymentsByStatus,
+    listDeployments,
     close
   };
 }

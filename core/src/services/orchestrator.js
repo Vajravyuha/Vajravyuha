@@ -14,6 +14,7 @@ const {
   safeErrorMessage
 } = require('../utils/redact');
 const { checkHealth } = require('./health');
+const { createGitService } = require('./git');
 
 // Find the first currently unused local TCP port at or above the requested start.
 async function findFreePort(startPort = 4001) {
@@ -68,6 +69,7 @@ function createOrchestrator({
   dockerRunner,
   atlasClient,
   config,
+  gitService = createGitService(),
   healthCheck = checkHealth,
   findPort = findFreePort,
   proxy = null,
@@ -98,9 +100,13 @@ function createOrchestrator({
       appName: deploymentRequest.appName,
       environment: deploymentRequest.environment,
       commitSha: deploymentRequest.commitSha,
+      repoUrl: deploymentRequest.repoUrl || null,
+      branch: deploymentRequest.branch || null,
       requestedBy: deploymentRequest.requestedBy
     });
     void runPipeline(id, {
+      repoUrl: deploymentRequest.repoUrl || null,
+      branch: deploymentRequest.branch || 'main',
       contextDir: deploymentRequest.contextDir,
       envVars: deploymentRequest.envVars,
       useSecrets: deploymentRequest.useSecrets
@@ -113,6 +119,15 @@ function createOrchestrator({
     activePipelines.add(id);
     const sensitiveValues = new Set(collectEnvironmentValues(requestOptions.envVars || {}));
     const safeLogger = createRedactingLogger(logger, sensitiveValues);
+    // Remember whether this run cloned a repository so the workspace is always cleaned up.
+    const isRepoDeployment = Boolean(requestOptions.repoUrl);
+    let workspaceRemoved = false;
+    // Remove the cloned workspace exactly once, on success and on every failure path.
+    async function cleanupWorkspace() {
+      if (!isRepoDeployment || workspaceRemoved) return;
+      workspaceRemoved = true;
+      await gitService.removeWorkspace(id);
+    }
     let secrets = null;
     let runEnvironment = null;
     let containerId = null;
@@ -124,11 +139,24 @@ function createOrchestrator({
 
       transitionDeployment(store, id, STATUS.BUILDING);
       safeLogger.info(`Deployment ${id} is building`);
-      const contextDirectory = path.isAbsolute(requestOptions.contextDir || '')
-        ? requestOptions.contextDir
-        : path.resolve(__dirname, '..', '..', requestOptions.contextDir || 'samples/hello-app');
+
+      // Clone the requested repository, or fall back to a local sample directory.
+      let contextDirectory;
+      if (isRepoDeployment) {
+        const clone = await gitService.cloneRepo(requestOptions.repoUrl, requestOptions.branch, id);
+        contextDirectory = clone.dir;
+        deployment = store.updateDeployment(id, { commitSha: clone.commitSha });
+        safeLogger.info(`Deployment ${id} checked out ${clone.commitSha}`);
+      } else {
+        contextDirectory = path.isAbsolute(requestOptions.contextDir || '')
+          ? requestOptions.contextDir
+          : path.resolve(__dirname, '..', '..', requestOptions.contextDir || 'samples/hello-app');
+      }
+
       const imageTag = `vajravyuha/${deployment.appName}:${deployment.id}`;
       await dockerRunner.buildImage(contextDirectory, imageTag);
+      // The checkout is only needed while Docker builds the image.
+      await cleanupWorkspace();
       if (cancelled.has(id)) return store.getDeployment(id);
 
       const imageId = await dockerRunner.getImageId(imageTag);
@@ -235,13 +263,17 @@ function createOrchestrator({
       safeLogger.info(`Deployment ${id} is running on port ${port}`);
       return deployment;
     } catch (error) {
-      const reason = safeErrorMessage(error, sensitiveValues);
+      // Git and checkout failures carry a short deployment reason such as CLONE_FAILED.
+      const reason = error && typeof error.reason === 'string' && error.reason
+        ? error.reason
+        : safeErrorMessage(error, sensitiveValues);
       const failed = failDeployment(id, reason, sensitiveValues);
       if (containerId) await dockerRunner.stop(containerId).catch(() => {});
       if (failed && failed.status === STATUS.FAILED && proxy) proxy.forget(id);
       safeLogger.error(`Deployment ${id} failed: ${reason}`);
       return failed;
     } finally {
+      await cleanupWorkspace();
       secrets = null;
       runEnvironment = null;
       sensitiveValues.clear();

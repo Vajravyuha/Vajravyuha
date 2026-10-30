@@ -1,0 +1,22 @@
+:root {
+  color-scheme: dark;
+  --bg: #0B0F14;
+  --panel: #11171E;
+  --panel-2: #151D26;
+  --line: #1F2A36;
+  --text: #C9D4DF;
+  --muted: #6B7C8F;
+  --accent: #35D07F;
+  --warn: #E5A93D;
+  --danger: #E5484D;
+  --info: #4CC9F0;
+  --severity-critical: var(--danger);
+  --severity-high: #E8803A;
+  --severity-medium: var(--warn);
+  --severity-low: #6B7C8F;
+  --font-ui: 'IBM Plex Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --radius-input: 2px;
+  --radius-panel: 4px;
+  --ease: 160ms ease-out;
+}

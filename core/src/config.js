@@ -52,6 +52,7 @@ function loadConfig() {
     registryPushHost: (process.env.REGISTRY_PUSH_HOST || 'localhost:5000').trim(),
     registryPullHost: (process.env.REGISTRY_PULL_HOST || 'localhost:5000').trim(),
     dbPath: (process.env.DB_PATH || 'core.db').trim(),
+    frontendOrigin: (process.env.FRONTEND_ORIGIN || 'http://localhost:5173').trim(),
     allowedApps: allowedApps ? Object.freeze(allowedApps) : null
   });
 }

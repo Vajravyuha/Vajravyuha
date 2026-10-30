@@ -1,10 +1,13 @@
 const crypto = require('node:crypto');
 const express = require('express');
+const cors = require('cors');
 const {
   deployRequestSchema,
+  deploymentListQuerySchema,
   secretsRequestSchema,
   appNameSchema,
-  toDeploymentResponse
+  toDeploymentResponse,
+  toDeploymentSummary
 } = require('./schemas');
 const { redact } = require('../utils/redact');
 
@@ -38,6 +41,14 @@ function asyncRoute(handler) {
 function createRoutes({ store, orchestrator, atlasClient, config }) {
   const router = express.Router();
 
+  // Answer browser preflights before the API-key check so the frontend can send X-API-Key.
+  router.use(cors({
+    origin: config.frontendOrigin || 'http://localhost:5173',
+    methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-API-Key'],
+    optionsSuccessStatus: 204
+  }));
+
   router.get('/health', asyncRoute(async (request, response) => {
     const atlas = await atlasClient.checkStatus().catch(() => false);
     response.json({ ok: true, atlas: atlas ? 'up' : 'down' });
@@ -65,6 +76,7 @@ function createRoutes({ store, orchestrator, atlasClient, config }) {
       return;
     }
 
+    // The validated request already carries repoUrl, branch and a resolved contextDir.
     const created = orchestrator.createDeployment(parsed.data);
     if (!created.allowed) {
       response.status(403).json({ error: 'APP_NOT_ALLOWED' });
@@ -72,6 +84,16 @@ function createRoutes({ store, orchestrator, atlasClient, config }) {
     }
     response.status(202).json({ id: created.id });
   }));
+
+  router.get('/deployments', (request, response) => {
+    const parsed = deploymentListQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      response.status(400).json({ error: 'INVALID_REQUEST' });
+      return;
+    }
+    const deployments = store.listDeployments(parsed.data.limit) || [];
+    response.json(deployments.map(toDeploymentSummary));
+  });
 
   router.get('/deployments/:id', (request, response) => {
     const deployment = store.getDeployment(request.params.id);
