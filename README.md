@@ -1,97 +1,65 @@
-#  WC 2026 CLI
+# NEXUS — Vajravyuha
 
-A FIFA World Cup 2026 terminal dashboard built with Node.js. Live scores, group standings, upcoming fixtures — all from your terminal.
+### Secure. Deploy. Monitor.
 
-```
-npx wc26
-```
+NEXUS is a secure, automated deployment platform designed to simplify the deployment of containerized applications while integrating security into the deployment lifecycle.
 
-> You'll need a free API key from [football-data.org](https://www.football-data.org/) to run it.
+Built as part of the Vajravyuha ecosystem, NEXUS connects application source code, container orchestration, and security validation through **Atlas**, its integrated security scanning service.
 
----
+The platform enables developers to deploy applications through a unified interface, monitor deployment health, and track deployment history—all while incorporating security checks before applications are brought online.
 
-## Features
+## Key Features
 
-- **Live Dashboard** — auto-refreshes every 60 seconds, press `Q` to exit
-- **All Matches** — every WC 2026 fixture with scores and status badges
-- **Upcoming Matches** — next 8 fixtures with kickoff times in IST
-- **Group Standings** — all 12 groups with points table
-- **Refresh Data** — manually pull latest data without restarting
+- **Automated Deployments** — Streamline application deployment through a centralized platform.
+- **Containerization** — Package and run applications using Docker containers.
+- **Atlas Security Integration** — Integrate security scanning into the deployment workflow.
+- **Deployment Orchestration** — Manage the application deployment lifecycle.
+- **Health Monitoring** — Perform application health checks and monitor deployment status.
+- **Deployment History** — Track deployment records and their outcomes.
+- **Web Dashboard** — Interact with deployments through a dedicated frontend interface.
 
----
+## Architecture
 
-## Demo
+NEXUS consists of three primary components:
 
-```
- __        ______   ____   ___ ____   __
- \ \      / / ___| |___ \ / _ \___ \ / /_
-  \ \ /\ / / |       __) | | | |__) | '_ \
-   \ V  V /| |___   / __/| |_| / __/| (_) |
-    \_/\_/  \____| |_____|\___/_____|\___/
+| Component | Description |
+|---|---|
+| **NEXUS Core** | Handles deployment requests, orchestration, Docker integration, and deployment state management. |
+| **Atlas** | Provides security scanning and validation as part of the deployment process. |
+| **Frontend** | Provides a web-based interface for initiating deployments and monitoring their status. |
 
-✔ World Cup data loaded!
+## Deployment Workflow
 
-? What do you want to do? ›
-  ❯ Live DashBoard
-    Upcoming Matches
-    All Matches
-    Standings
-    Refresh Data
-    Quit
+1. A user submits an application deployment request through the frontend.
+2. NEXUS Core validates the request.
+3. The application is prepared for containerization.
+4. Atlas performs security validation.
+5. NEXUS proceeds with deployment based on the security result.
+6. The deployed application is health-checked.
+7. Deployment status and history are made available through the dashboard.
 
-╔══════════════════════════════════════════════════╗
-║ Brazil  vs  Argentina                            ║
-║  2 - 1   |  LIVE                                 ║
-╚══════════════════════════════════════════════════╝
-```
+## Technology Stack
 
----
+- **Backend:** Node.js, Express.js
+- **Frontend:** React, Vite
+- **Containerization:** Docker
+- **Security Service:** Atlas
+- **Database:** SQLite
+- **Security Service Backend:** Java, Spring Boot
 
-## Setup
+## Project Structure
 
-**1. Get a free API key**
-
-Sign up at [football-data.org](https://www.football-data.org/) and copy your token from the dashboard.
-
-**2. Run with npx**
-
-```bash
-API_KEY=your_token_here npx wc26
-```
-
-**Or clone and run locally:**
-
-```bash
-git clone https://github.com/KAMMAR-SHASHANK/fifa-wc-cli.git
-cd fifa-wc-cli
-npm install
+```text
+NEXUS_AI/
+├── core/                       # NEXUS Core deployment service
+├── frontend/                   # Web dashboard
+├── Vajravyuha-atlas-security/  # Atlas security service
+├── .gitignore
+└── README.md
 ```
 
-Create a `.env` file:
+## Vision
 
-```
-API_KEY=your_token_here
-```
+NEXUS aims to make secure application deployment more accessible by bringing deployment automation, container orchestration, and security validation into a single workflow.
 
-Then run:
-
-```bash
-node index.js
-```
-
----
-
-## Tech Stack
-
-- **Node.js** v25+ with ES Modules
-- **chalk** — terminal colors
-- **inquirer** — interactive menu
-- **ora** — loading spinners
-- **figlet** — ASCII banner
-- **football-data.org API** — live match data
-
----
-
-## License
-
-ISC
+**NEXUS — Deployment with security at its core.**
